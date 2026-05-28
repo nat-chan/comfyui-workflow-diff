@@ -1,0 +1,26 @@
+[project]
+name = "comfyui-workflow-diff"
+description = "ComfyUI custom node providing /workflow/diff (visual diff renderer) and /workflow/convert (graph→API) endpoints"
+version = "0.1.0"
+license = "MIT"
+dependencies = []
+authors = [
+    {name = "nat-chan"}
+]
+requires-python = ">=3.10"
+
+[project.urls]
+Repository = "https://github.com/nat-chan/comfyui-workflow-diff"
+
+[tool.comfy]
+PublisherId = "nat-chan"
+DisplayName = "Workflow Diff (+ Convert)"
+Icon = ""
+Description = "Renders a litegraph-style SVG diff between two ComfyUI workflows. Also exposes /workflow/convert (full workflow → workflow_api)."
+NodeNames = []
+
+# NOTE: pytest configuration intentionally lives in tests/pytest.ini.
+# Putting it here would make pytest pick the package root as its rootdir,
+# which would then trip over __init__.py (it requires ComfyUI's
+# `server` module at import time). Run tests with `pytest` from the
+# project root or `pytest tests/` — either works.

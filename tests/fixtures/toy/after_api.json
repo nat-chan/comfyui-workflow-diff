@@ -1,0 +1,42 @@
+{
+  "1": {
+    "inputs": {
+      "image": "sample.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {"title": "Load Image"}
+  },
+  "2": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "width": 1024,
+      "height": 512,
+      "crop": "disabled",
+      "image": ["1", 0]
+    },
+    "class_type": "ImageScale",
+    "_meta": {"title": "Upscale Image"}
+  },
+  "3": {
+    "inputs": {
+      "image": ["2", 0]
+    },
+    "class_type": "ImageInvert",
+    "_meta": {"title": "Invert Image"}
+  },
+  "4": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": ["3", 0]
+    },
+    "class_type": "SaveImage",
+    "_meta": {"title": "Save Image"}
+  },
+  "5": {
+    "inputs": {
+      "images": ["3", 0]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {"title": "Preview Image"}
+  }
+}
