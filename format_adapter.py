@@ -24,8 +24,10 @@ from __future__ import annotations
 from typing import Any, Literal
 
 try:
+    from .widget_names import promoted_input_names
     from .workflow_api_adapter import api_to_ui_workflow
 except ImportError:  # standalone execution / tests
+    from widget_names import promoted_input_names  # type: ignore
     from workflow_api_adapter import api_to_ui_workflow  # type: ignore
 
 
@@ -108,6 +110,37 @@ def _backfill_widget_names(
             cached = n.get("_widget_names")
             if isinstance(cached, list) and cached:
                 registry[ntype] = list(cached)
+
+    # The API adapter trims promoted-to-input widgets out of
+    # ``_widget_names`` (since their values aren't in widgets_values
+    # either). But when the OTHER side has the same widget as a normal
+    # widget — its widgets_values *does* include the slot, and we need
+    # a canonical name for it to reconcile correctly. ComfyUI's UI JSON
+    # preserves the original widget name in ``inputs[].widget.name``
+    # whenever a widget was converted to an input, so harvesting those
+    # gives us names the trimmed registry misses. We prepend them on
+    # the heuristic that promoted widgets tend to come early in
+    # INPUT_TYPES (true for KSampler's ``seed`` — the canonical case).
+    promoted_by_type: dict[str, list[str]] = {}
+    seen_per_type: dict[str, set[str]] = {}
+    for src in (workflow_a, workflow_b):
+        for n in src.get("nodes") or []:
+            ntype = n.get("type")
+            if not isinstance(ntype, str):
+                continue
+            already = seen_per_type.setdefault(ntype, set())
+            for name in promoted_input_names(n):
+                if name in already:
+                    continue
+                already.add(name)
+                promoted_by_type.setdefault(ntype, []).append(name)
+
+    for ntype, promoted_names in promoted_by_type.items():
+        existing = registry.get(ntype, [])
+        existing_set = set(existing)
+        missing = [n for n in promoted_names if n not in existing_set]
+        if missing:
+            registry[ntype] = missing + existing
 
     def _apply(wf: dict[str, Any]) -> dict[str, Any]:
         new_nodes: list[dict[str, Any]] = []
