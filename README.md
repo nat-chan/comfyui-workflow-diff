@@ -15,8 +15,8 @@ ComfyUI custom node that adds two HTTP endpoints to your running ComfyUI server:
    what `/prompt` accepts).
 
 The converter is a fork of
-[Seth Robinson's `comfyui-workflow-to-api-converter-endpoint`](https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint)
-(see `LICENSE.upstream`). The diff renderer is original.
+[Seth Robinson's `comfyui-workflow-to-api-converter-endpoint`](https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint).
+The diff renderer is original.
 
 ## Installation
 
