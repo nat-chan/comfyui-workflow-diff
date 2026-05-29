@@ -41,6 +41,21 @@ curl -s -X POST http://localhost:8188/workflow/convert \
   > workflow_api.json
 ```
 
+### `POST /workflow/is_ui`
+
+Detect whether a workflow JSON is the full UI format (with `nodes` /
+`links`) or the API/prompt format (dict keyed by node id). Useful for a
+client that needs to know whether to call `/workflow/convert` first.
+
+```bash
+curl -s -X POST http://localhost:8188/workflow/is_ui \
+  -H 'Content-Type: application/json' \
+  --data-binary @workflow.json
+# {"is_ui": true}   ← UI format
+# {"is_ui": false}  ← API format
+# HTTP 400 if neither shape matches
+```
+
 ### `POST /workflow/diff`
 
 Body:

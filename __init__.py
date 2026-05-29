@@ -273,6 +273,38 @@ async def diff_ui(request: web.Request) -> web.Response:
     return web.Response(text=_DIFF_UI_HTML, content_type="text/html")
 
 
+# ------------------------------------------------------------- /is_ui
+async def is_ui_endpoint(request: web.Request) -> web.Response:
+    """POST a workflow JSON. Returns ``{"is_ui": true}`` when the input
+    looks like the full UI workflow format (has ``nodes`` / ``links``)
+    and ``{"is_ui": false}`` when it looks like the workflow_api prompt
+    format (dict keyed by node id with ``class_type``). 400 if neither.
+    """
+    try:
+        if request.content_length is not None and request.content_length > MAX_CONTENT_LENGTH:
+            return web.json_response(
+                {"error": f"Request too large. Max {MAX_CONTENT_LENGTH // (1024 * 1024)} MB"},
+                status=413,
+            )
+        data = await request.json()
+    except json.JSONDecodeError as e:
+        return web.json_response({"error": f"Invalid JSON: {e}"}, status=400)
+
+    fmt = detect_format(data)
+    if fmt is None:
+        return web.json_response(
+            {
+                "error": (
+                    "Unrecognised workflow shape — expected UI format "
+                    "(with 'nodes' and 'links' arrays) or API format "
+                    "(dict of node descriptors with 'class_type')."
+                )
+            },
+            status=400,
+        )
+    return web.json_response({"is_ui": fmt == "ui"})
+
+
 # ------------------------------------------------------------------ utils
 def _validate_workflow(data: Any, *, name: str) -> str | None:
     if not isinstance(data, dict):
@@ -364,9 +396,10 @@ if PromptServer is not None:
     _routes.post("/workflow/diff")(diff_workflow_endpoint)
     _routes.get("/workflow/diff")(diff_info)
     _routes.get("/workflow/diff/ui")(diff_ui)
+    _routes.post("/workflow/is_ui")(is_ui_endpoint)
     print(
         f"[workflow-diff v{__version__}] endpoints registered: "
-        "/workflow/diff, /workflow/diff/ui, /workflow/convert"
+        "/workflow/diff, /workflow/diff/ui, /workflow/is_ui, /workflow/convert"
     )
 
 
