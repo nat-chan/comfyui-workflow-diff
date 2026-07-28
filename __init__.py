@@ -19,6 +19,11 @@ ComfyUI Workflow Diff — custom node providing:
         Convert a 'full' workflow (UI graph format, with nodes & links)
         to the API prompt format used by /prompt.  Ported from
         https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint
+
+    POST /workflow/to_ui
+        The reverse: convert an API-format prompt to the UI workflow
+        JSON, mirroring what the frontend saves after "Load" of an API
+        file (loadApiJson → graph.arrange → serialize).
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from typing import Any
 
 from aiohttp import web
 
+from .api_to_ui import convert_api_to_ui
 from .format_adapter import detect_format, prepare_diff_inputs
 from .workflow_diff import diff_workflows
 from .workflow_renderer import render_workflow_diff_svg, render_workflow_svg
@@ -48,6 +54,7 @@ MAX_CONTENT_LENGTH = 4 * 1024 * 1024  # 4 MB — diff bodies carry 2 workflows
 WorkflowConverter: type | None
 try:
     from .workflow_converter import WorkflowConverter as _WorkflowConverter
+
     WorkflowConverter = _WorkflowConverter
 except ImportError as e:
     logger.warning("workflow_converter unavailable (%s); /workflow/convert will be disabled.", e)
@@ -58,7 +65,8 @@ try:
 except ImportError as e:
     logger.warning(
         "PromptServer unavailable (%s); HTTP endpoints will NOT be registered. "
-        "This is expected when importing this package outside of ComfyUI.", e,
+        "This is expected when importing this package outside of ComfyUI.",
+        e,
     )
     PromptServer = None
 
@@ -119,6 +127,86 @@ async def converter_info(request: web.Request) -> web.Response:
     )
 
 
+# ---------------------------------------------------------------- /to_ui
+async def to_ui_endpoint(request: web.Request) -> web.Response:
+    """Convert an API-format prompt to the UI workflow format.
+
+    Mirrors the frontend's "Load API json → Save" behaviour (see
+    ``api_to_ui.py`` for the exact fidelity notes). If the body is
+    already a UI workflow it is returned unchanged, symmetric with
+    ``/workflow/convert``. Node types that are not registered on this
+    server are skipped — exactly like the frontend, which shows a
+    missing-nodes toast and loads the rest — and reported in the
+    ``X-Workflow-Convert-Missing-Nodes`` response header.
+    """
+    try:
+        if request.content_length is not None and request.content_length > MAX_CONTENT_LENGTH:
+            return web.json_response(
+                {"error": f"Request too large. Max {MAX_CONTENT_LENGTH // (1024 * 1024)} MB"},
+                status=413,
+            )
+        data = await request.json()
+    except json.JSONDecodeError as e:
+        return web.json_response({"error": f"Invalid JSON: {e}"}, status=400)
+
+    fmt = detect_format(data)
+    if fmt == "ui":
+        return web.json_response(data, dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2))
+    if fmt != "api":
+        return web.json_response(
+            {
+                "error": (
+                    "Unrecognised workflow shape — expected API format "
+                    "(dict of node descriptors with 'class_type')."
+                )
+            },
+            status=400,
+        )
+
+    try:
+        workflow, missing = convert_api_to_ui(data)
+    except ImportError:
+        return web.json_response(
+            {"error": "ComfyUI nodes module not loaded — /workflow/to_ui unavailable."},
+            status=503,
+        )
+    except Exception:
+        logger.exception("Error converting API workflow to UI format")
+        return web.json_response({"error": "Internal server error during conversion"}, status=500)
+
+    headers: dict[str, str] = {}
+    if missing:
+        headers["X-Workflow-Convert-Missing-Nodes"] = ", ".join(missing)
+        logger.warning("to_ui: skipped unknown node types: %s", ", ".join(missing))
+    logger.info(
+        f"[workflow-diff v{__version__}] converted API prompt: "
+        f"{len(workflow['nodes'])} nodes, {len(workflow['links'])} links"
+        + (f" ({len(missing)} missing types skipped)" if missing else "")
+    )
+    return web.json_response(
+        workflow,
+        dumps=lambda x: json.dumps(x, ensure_ascii=False, indent=2),
+        headers=headers,
+    )
+
+
+async def to_ui_info(request: web.Request) -> web.Response:
+    return web.json_response(
+        {
+            "name": "ComfyUI Workflow Diff — to_ui",
+            "version": __version__,
+            "description": (
+                "POST an API-format prompt JSON here to receive the UI workflow "
+                "JSON — same behaviour as loading the API file in the ComfyUI "
+                "frontend and saving it (loadApiJson → arrange → serialize). "
+                "UI-format input is returned unchanged. Unknown node types are "
+                "skipped and listed in the X-Workflow-Convert-Missing-Nodes "
+                "response header."
+            ),
+        }
+    )
+
+
 # ----------------------------------------------------------------- /diff
 async def diff_workflow_endpoint(request: web.Request) -> web.Response:
     """Render a visual diff between two workflows as SVG.
@@ -168,19 +256,17 @@ async def diff_workflow_endpoint(request: web.Request) -> web.Response:
         return web.json_response({"error": str(e)}, status=400)
     except Exception:
         logger.exception("Error coercing workflows")
-        return web.json_response({"error": "Internal server error during input coercion"}, status=500)
+        return web.json_response(
+            {"error": "Internal server error during input coercion"}, status=500
+        )
 
     mode = (body.get("mode") or "all").lower()
     if mode not in ("all", "changed_only"):
-        return web.json_response(
-            {"error": 'mode must be "all" or "changed_only"'}, status=400
-        )
+        return web.json_response({"error": 'mode must be "all" or "changed_only"'}, status=400)
     include_moved = bool(body.get("include_moved", False))
     layout = (body.get("layout") or "topo").lower()
     if layout not in ("topo", "preserve"):
-        return web.json_response(
-            {"error": 'layout must be "topo" or "preserve"'}, status=400
-        )
+        return web.json_response({"error": 'layout must be "topo" or "preserve"'}, status=400)
 
     # 'preserve' only makes sense when both inputs are full UI workflows
     # — that's the only situation where the node `pos` fields represent
@@ -230,7 +316,9 @@ async def diff_workflow_endpoint(request: web.Request) -> web.Response:
 
     try:
         svg_text = render_workflow_diff_svg(
-            wf_a, wf_b, diff,
+            wf_a,
+            wf_b,
+            diff,
             mode=mode,
             include_moved=include_moved,
             layout=layout,
@@ -393,13 +481,16 @@ if PromptServer is not None:
     _routes = PromptServer.instance.routes
     _routes.post("/workflow/convert")(convert_workflow_endpoint)
     _routes.get("/workflow/convert")(converter_info)
+    _routes.post("/workflow/to_ui")(to_ui_endpoint)
+    _routes.get("/workflow/to_ui")(to_ui_info)
     _routes.post("/workflow/diff")(diff_workflow_endpoint)
     _routes.get("/workflow/diff")(diff_info)
     _routes.get("/workflow/diff/ui")(diff_ui)
     _routes.post("/workflow/is_ui")(is_ui_endpoint)
     print(
         f"[workflow-diff v{__version__}] endpoints registered: "
-        "/workflow/diff, /workflow/diff/ui, /workflow/is_ui, /workflow/convert"
+        "/workflow/diff, /workflow/diff/ui, /workflow/is_ui, /workflow/convert, "
+        "/workflow/to_ui"
     )
 
 

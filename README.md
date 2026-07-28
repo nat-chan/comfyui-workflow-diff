@@ -13,6 +13,9 @@ ComfyUI custom node that adds two HTTP endpoints to your running ComfyUI server:
    produces from `Save`, complete with node positions/sizes/widget values) into
    the API/prompt format (`workflow_api.json`, what `Save (API)` produces and
    what `/prompt` accepts).
+3. **`/workflow/to_ui`** — the reverse conversion: API/prompt format back to
+   the full UI workflow, faithful to what the frontend itself saves after
+   loading an API file.
 
 The converter is a fork of
 [Seth Robinson's `comfyui-workflow-to-api-converter-endpoint`](https://github.com/SethRobinson/comfyui-workflow-to-api-converter-endpoint).
@@ -39,6 +42,30 @@ curl -s -X POST http://localhost:8188/workflow/convert \
   -H 'Content-Type: application/json' \
   --data-binary @workflow.json \
   > workflow_api.json
+```
+
+### `POST /workflow/to_ui`
+
+The reverse of `/workflow/convert`: turn an API/prompt JSON into the full
+UI workflow JSON, reproducing what the ComfyUI frontend saves after you
+*Load* an API-format file (`loadApiJson` → `graph.arrange()` →
+`serialize()`, including the save-time widget-slot compression and
+`extra.frontendVersion` stamp). Widget rows are rebuilt from the node
+definitions — including the `control_after_generate` widget (default
+`"randomize"`) — so the result round-trips through `/workflow/convert`
+back to the original API JSON. Node positions come from litegraph's
+`arrange()` layered layout; sizes use litegraph's headless text-measure
+fallback, so they are close to (not bit-identical with) a real browser
+save. Unknown node types are skipped, mirroring the frontend's
+missing-nodes toast, and reported in the
+`X-Workflow-Convert-Missing-Nodes` response header. UI-format input is
+returned unchanged.
+
+```bash
+curl -s -X POST http://localhost:8188/workflow/to_ui \
+  -H 'Content-Type: application/json' \
+  --data-binary @workflow_api.json \
+  > workflow.json
 ```
 
 ### `POST /workflow/is_ui`
